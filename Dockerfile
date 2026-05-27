@@ -23,4 +23,9 @@ COPY --from=builder /app/prisma ./prisma
 COPY --from=builder /app/package.json ./package.json
 
 # Render injects PORT at runtime; main.ts reads it via ConfigService.
-CMD ["node", "dist/main"]
+# Render's free tier has no Pre-Deploy hook, so migrations run at startup.
+# `migrate deploy` is idempotent — a no-op when the DB is already up to date —
+# and fails fast (server won't boot) if a migration can't apply, which is the
+# behaviour we want. The prisma CLI is present because the runtime image copies
+# the full node_modules from the builder stage.
+CMD ["sh", "-c", "npx prisma migrate deploy && node dist/main"]
