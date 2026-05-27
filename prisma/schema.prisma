@@ -1,0 +1,133 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum PetSpecies {
+  DOG
+  CAT
+  RABBIT
+  BIRD
+  SMALL
+  OTHER
+}
+
+enum PetSize {
+  SMALL
+  MEDIUM
+  LARGE
+}
+
+enum PetStatus {
+  AVAILABLE
+  PENDING
+  ADOPTED
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  name         String
+  avatarUrl    String?
+  bio          String?
+  city         String?
+  region       String?
+  country      String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  pets                 Pet[]
+  ownerConversations   Conversation[] @relation("OwnerConversations")
+  adopterConversations Conversation[] @relation("AdopterConversations")
+  sentMessages         Message[]
+  refreshTokens        RefreshToken[]
+}
+
+model RefreshToken {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String    @unique
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+}
+
+model Pet {
+  id                String     @id @default(cuid())
+  name              String?
+  species           PetSpecies
+  breed             String?
+  ageMonths         Int
+  size              PetSize
+  shortDescription  String     @db.VarChar(280)
+  story             String?
+  reasonForRehoming String?
+  city              String
+  region            String?
+  country           String
+  status            PetStatus  @default(AVAILABLE)
+  ownerId           String
+  createdAt         DateTime   @default(now())
+  updatedAt         DateTime   @updatedAt
+
+  owner         User           @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  photos        Photo[]
+  conversations Conversation[]
+
+  @@index([status, createdAt])
+  @@index([ownerId])
+}
+
+model Photo {
+  id        String   @id @default(cuid())
+  petId     String
+  url       String
+  publicId  String?
+  order     Int      @default(0)
+  createdAt DateTime @default(now())
+
+  pet Pet @relation(fields: [petId], references: [id], onDelete: Cascade)
+
+  @@index([petId])
+}
+
+model Conversation {
+  id        String   @id @default(cuid())
+  petId     String
+  ownerId   String
+  adopterId String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  pet      Pet       @relation(fields: [petId], references: [id], onDelete: Cascade)
+  owner    User      @relation("OwnerConversations", fields: [ownerId], references: [id], onDelete: Cascade)
+  adopter  User      @relation("AdopterConversations", fields: [adopterId], references: [id], onDelete: Cascade)
+  messages Message[]
+
+  @@unique([petId, adopterId])
+  @@index([ownerId])
+  @@index([adopterId])
+}
+
+model Message {
+  id             String    @id @default(cuid())
+  conversationId String
+  senderId       String
+  body           String
+  deliveredAt    DateTime?
+  readAt         DateTime?
+  createdAt      DateTime  @default(now())
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender       User         @relation(fields: [senderId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId, createdAt])
+}
