@@ -1,0 +1,45 @@
+name: Enforce Branch Source Rules
+
+on:
+  pull_request:
+    # Remove branch restriction - trigger on all PRs
+
+permissions:
+  contents: read
+  pull-requests: read
+  statuses: write
+  checks: write
+
+jobs:
+  check-branch-policy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check branch policy
+        run: |
+          BASE_BRANCH="${{ github.base_ref }}"  # target branch of the PR
+          HEAD_BRANCH="${{ github.head_ref }}"  # source branch of the PR
+
+          echo "PR from $HEAD_BRANCH into $BASE_BRANCH"
+
+          # Only enforce rules for protected branches
+          if [ "$BASE_BRANCH" = "stage" ] || [ "$BASE_BRANCH" = "main" ]; then
+            # Rule 1: Only dev or main → stage
+            if [ "$BASE_BRANCH" = "stage" ] && [ "$HEAD_BRANCH" != "dev" ] && [ "$HEAD_BRANCH" != "main" ]; then
+              echo "Only dev or main can merge into stage."
+              echo "Current source: $HEAD_BRANCH"
+              echo "Allowed sources for stage: dev, main"
+              exit 1
+            fi
+
+            # Rule 2: Only stage → main
+            if [ "$BASE_BRANCH" = "main" ] && [ "$HEAD_BRANCH" != "stage" ]; then
+              echo "Only stage can merge into main."
+              echo "Current source: $HEAD_BRANCH"
+              echo "Allowed source for main: stage"
+              exit 1
+            fi
+
+            echo "Branch policy check passed for protected branch: $BASE_BRANCH"
+          else
+            echo "No branch restrictions for $BASE_BRANCH - check passed"
+          fi
