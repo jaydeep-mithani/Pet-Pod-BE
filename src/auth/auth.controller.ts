@@ -8,6 +8,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { ApiCookieAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import type { CookieOptions, Response } from 'express';
 import { AuthService, type TokenPair } from './auth.service';
 import { SignupDto } from './dto/signup.dto';
@@ -19,6 +20,7 @@ import { CurrentUser } from './decorators/current-user.decorator';
 import type { AuthenticatedRequestUser } from './types';
 import type { JwtRefreshUser } from './strategies/jwt-refresh.strategy';
 
+@ApiTags('Auth')
 @Controller('auth')
 export class AuthController {
   constructor(
@@ -26,6 +28,7 @@ export class AuthController {
     private readonly config: ConfigService,
   ) {}
 
+  @ApiOperation({ summary: 'Create a new account and set auth cookies.' })
   @Post('signup')
   @HttpCode(HttpStatus.CREATED)
   async signup(
@@ -37,6 +40,7 @@ export class AuthController {
     return { user: result.user };
   }
 
+  @ApiOperation({ summary: 'Exchange credentials for auth cookies.' })
   @Post('login')
   @HttpCode(HttpStatus.OK)
   async login(
@@ -48,6 +52,11 @@ export class AuthController {
     return { user: result.user };
   }
 
+  @ApiCookieAuth('pp_refresh')
+  @ApiOperation({
+    summary:
+      'Rotate the refresh token and issue a new access token. Requires pp_refresh cookie.',
+  })
   @UseGuards(JwtRefreshGuard)
   @Post('refresh')
   @HttpCode(HttpStatus.OK)
@@ -60,6 +69,10 @@ export class AuthController {
     return { ok: true };
   }
 
+  @ApiCookieAuth('pp_access')
+  @ApiOperation({
+    summary: 'Revoke the current refresh token and clear auth cookies.',
+  })
   @UseGuards(JwtAuthGuard)
   @Post('logout')
   @HttpCode(HttpStatus.OK)
