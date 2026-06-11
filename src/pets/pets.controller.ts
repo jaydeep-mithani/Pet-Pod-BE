@@ -13,6 +13,7 @@ import {
 } from '@nestjs/common';
 import { ApiCookieAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { EmailVerifiedGuard } from '../auth/guards/email-verified.guard';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import type { AuthenticatedRequestUser } from '../auth/types';
 import { PetsService } from './pets.service';
@@ -48,8 +49,8 @@ export class PetsController {
   }
 
   @ApiCookieAuth('pp_access')
-  @ApiOperation({ summary: 'Create a pet listing.' })
-  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Create a pet listing. Requires verified email.' })
+  @UseGuards(JwtAuthGuard, EmailVerifiedGuard)
   @Post()
   create(
     @CurrentUser() user: AuthenticatedRequestUser,
