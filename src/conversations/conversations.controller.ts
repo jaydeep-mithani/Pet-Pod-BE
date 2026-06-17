@@ -11,6 +11,7 @@ import {
 } from '@nestjs/common';
 import { ApiCookieAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { EmailVerifiedGuard } from '../auth/guards/email-verified.guard';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import type { AuthenticatedRequestUser } from '../auth/types';
 import { ChatGateway } from '../chat/chat.gateway';
@@ -37,8 +38,9 @@ export class ConversationsController {
 
   @ApiOperation({
     summary:
-      'Create or return the existing conversation between the current user (adopter) and the rehomer of the given pet.',
+      'Create or return the existing conversation between the current user (adopter) and the rehomer of the given pet. Requires verified email.',
   })
+  @UseGuards(EmailVerifiedGuard)
   @Post()
   @HttpCode(HttpStatus.OK)
   createOrGet(
@@ -69,7 +71,11 @@ export class ConversationsController {
     return this.conversations.listMessages(id, user.id, query);
   }
 
-  @ApiOperation({ summary: 'Send a message. Also broadcasts via Socket.IO.' })
+  @ApiOperation({
+    summary:
+      'Send a message. Requires verified email. Also broadcasts via Socket.IO.',
+  })
+  @UseGuards(EmailVerifiedGuard)
   @Post(':id/messages')
   async sendMessage(
     @Param('id') id: string,

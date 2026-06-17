@@ -11,6 +11,7 @@ const USER_PROFILE_SELECT = {
   city: true,
   region: true,
   country: true,
+  emailVerified: true,
   createdAt: true,
 } as const;
 
