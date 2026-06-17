@@ -1,6 +1,7 @@
 import { ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
+import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import cookieParser from 'cookie-parser';
 import { AppModule } from './app.module';
 
@@ -37,6 +38,23 @@ async function bootstrap() {
     },
     credentials: true,
   });
+
+  if (config.get<string>('SWAGGER_ENABLED') === 'true') {
+    const swaggerConfig = new DocumentBuilder()
+      .setTitle('Pet Pod API')
+      .setDescription('REST + WebSocket API for the Pet Pod rehoming platform.')
+      .setVersion('1.0')
+      .addCookieAuth('pp_access', {
+        type: 'apiKey',
+        in: 'cookie',
+        name: 'pp_access',
+      })
+      .build();
+    const document = SwaggerModule.createDocument(app, swaggerConfig);
+    SwaggerModule.setup('docs', app, document, {
+      swaggerOptions: { persistAuthorization: true },
+    });
+  }
 
   const port = Number(config.get('PORT') ?? 4000);
   await app.listen(port);

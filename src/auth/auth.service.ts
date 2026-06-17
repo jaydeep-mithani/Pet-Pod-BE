@@ -12,6 +12,7 @@ import { SignupDto } from './dto/signup.dto';
 import { LoginDto } from './dto/login.dto';
 import { BCRYPT_ROUNDS } from './auth.constants';
 import type { JwtPayload } from './types';
+import type { GoogleProfilePayload } from './strategies/google.strategy';
 
 export interface TokenPair {
   accessToken: string;
@@ -23,6 +24,11 @@ export interface TokenPair {
 interface AuthResult {
   user: { id: string; email: string; name: string };
   tokens: TokenPair;
+}
+
+interface GoogleAuthResult extends AuthResult {
+  /** True when this OAuth callback created a brand-new user record. */
+  isNew: boolean;
 }
 
 @Injectable()
@@ -51,6 +57,9 @@ export class AuthService {
       select: { id: true, email: true, name: true },
     });
 
+    // The /verify-email page auto-sends the first code on mount. Doing it
+    // here too caused a race where the FE's send invalidated the BE's send
+    // and users entered the code from the (now-invalidated) first email.
     const tokens = await this.issueTokens(user.id, user.email);
     return { user, tokens };
   }
@@ -59,7 +68,20 @@ export class AuthService {
     const user = await this.prisma.user.findUnique({
       where: { email: dto.email.toLowerCase() },
     });
-    if (!user || !(await bcrypt.compare(dto.password, user.passwordHash))) {
+    if (!user) {
+      throw new UnauthorizedException('Invalid email or password');
+    }
+    // No password on the account means the user signed up via Google. Use a
+    // distinct error code so the FE can show only the toast (no misleading
+    // "wrong password" field error).
+    if (!user.passwordHash) {
+      throw new UnauthorizedException({
+        message:
+          'This account uses Google sign-in. Please continue with Google.',
+        code: 'USE_GOOGLE_SIGNIN',
+      });
+    }
+    if (!(await bcrypt.compare(dto.password, user.passwordHash))) {
       throw new UnauthorizedException('Invalid email or password');
     }
 
@@ -68,6 +90,63 @@ export class AuthService {
       user: { id: user.id, email: user.email, name: user.name },
       tokens,
     };
+  }
+
+  /**
+   * Create-or-link a Google identity and issue our own auth tokens. Three
+   * paths:
+   *   1. A user already exists with this googleId → log them in.
+   *   2. A user exists with this email (signed up via password) → link the
+   *      Google identity to the existing account and log in.
+   *   3. No user yet → create a fresh one with email pre-verified (Google
+   *      already verified the address) and avatar from the Google profile.
+   */
+  async loginWithGoogle(
+    profile: GoogleProfilePayload,
+  ): Promise<GoogleAuthResult> {
+    let user = await this.prisma.user.findUnique({
+      where: { googleId: profile.googleId },
+      select: { id: true, email: true, name: true },
+    });
+    let isNew = false;
+
+    if (!user) {
+      const byEmail = await this.prisma.user.findUnique({
+        where: { email: profile.email },
+        select: { id: true, email: true, name: true },
+      });
+
+      if (byEmail) {
+        // Existing password-based account → link the Google identity.
+        user = await this.prisma.user.update({
+          where: { id: byEmail.id },
+          data: {
+            googleId: profile.googleId,
+            // If they hadn't verified yet, Google's verification counts.
+            emailVerified: true,
+            emailVerifiedAt: new Date(),
+          },
+          select: { id: true, email: true, name: true },
+        });
+      } else {
+        // Brand-new user — pre-verified, avatar pulled from Google profile.
+        user = await this.prisma.user.create({
+          data: {
+            email: profile.email,
+            name: profile.name,
+            googleId: profile.googleId,
+            avatarUrl: profile.avatarUrl,
+            emailVerified: true,
+            emailVerifiedAt: new Date(),
+          },
+          select: { id: true, email: true, name: true },
+        });
+        isNew = true;
+      }
+    }
+
+    const tokens = await this.issueTokens(user.id, user.email);
+    return { user, tokens, isNew };
   }
 
   async refresh(

@@ -29,23 +29,35 @@ enum PetStatus {
 }
 
 model User {
-  id           String   @id @default(cuid())
-  email        String   @unique
-  passwordHash String
-  name         String
-  avatarUrl    String?
-  bio          String?
-  city         String?
-  region       String?
-  country      String?
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id              String    @id @default(cuid())
+  email           String    @unique
+  // Optional: Google-signed-up users start without one. Linking a password
+  // later is fine — we'd just hash and store as we do for native signup.
+  passwordHash    String?
+  // Optional: only present for users who signed in via Google. Unique so we
+  // can look users up by their Google ID on subsequent logins.
+  googleId        String?   @unique
+  name            String
+  avatarUrl       String?
+  bio             String?
+  city            String?
+  region          String?
+  country         String?
+  emailVerified   Boolean   @default(false)
+  emailVerifiedAt DateTime?
+  // Bumped whenever the password is reset. JwtStrategy compares against the
+  // token's iat to revoke still-outstanding access tokens after a reset.
+  passwordChangedAt DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 
   pets                 Pet[]
   ownerConversations   Conversation[] @relation("OwnerConversations")
   adopterConversations Conversation[] @relation("AdopterConversations")
   sentMessages         Message[]
   refreshTokens        RefreshToken[]
+  emailVerifications   EmailVerification[]
+  passwordResets       PasswordReset[]
 }
 
 model RefreshToken {
@@ -58,6 +70,34 @@ model RefreshToken {
   createdAt DateTime  @default(now())
 
   @@index([userId])
+}
+
+model EmailVerification {
+  id          String    @id @default(cuid())
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  codeHash    String
+  attempts    Int       @default(0)
+  expiresAt   DateTime
+  consumedAt  DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@index([userId, createdAt])
+}
+
+model PasswordReset {
+  id         String    @id @default(cuid())
+  userId     String
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // SHA-256 of the plaintext token. Unique so we can findUnique on the
+  // hashed value (effectively O(log n)) and so the constraint documents
+  // intent.
+  tokenHash  String    @unique
+  expiresAt  DateTime
+  consumedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([userId, createdAt])
 }
 
 model Pet {
