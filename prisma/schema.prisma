@@ -26,6 +26,10 @@ enum PetStatus {
   AVAILABLE
   PENDING
   ADOPTED
+  // Listing taken down (e.g. owner deleted their account). Kept as a status
+  // rather than deleting the row so conversations that cascade from Pet
+  // survive for the other participant.
+  REMOVED
 }
 
 model User {
@@ -48,6 +52,10 @@ model User {
   // Bumped whenever the password is reset. JwtStrategy compares against the
   // token's iat to revoke still-outstanding access tokens after a reset.
   passwordChangedAt DateTime?
+  // Anonymize-delete marker. The row is kept (with PII scrubbed) so the other
+  // side of every conversation retains their history; any non-null value
+  // blocks login, refresh, and JWT validation.
+  deletedAt       DateTime?
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 

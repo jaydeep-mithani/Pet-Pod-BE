@@ -66,9 +66,18 @@ export class ConversationsService {
   async createOrGet(adopterId: string, petId: string) {
     const pet = await this.prisma.pet.findUnique({
       where: { id: petId },
-      select: { id: true, ownerId: true },
+      select: {
+        id: true,
+        ownerId: true,
+        status: true,
+        owner: { select: { deletedAt: true } },
+      },
     });
-    if (!pet) throw new NotFoundException('Pet not found');
+    // Taken-down listings and deleted owners can't start new conversations —
+    // existing ones stay readable, but there's nobody on the other end.
+    if (!pet || pet.status === 'REMOVED' || pet.owner.deletedAt) {
+      throw new NotFoundException('Pet not found');
+    }
     if (pet.ownerId === adopterId) {
       throw new ForbiddenException(
         "You can't message yourself about your own pet",
@@ -225,6 +234,21 @@ export class ConversationsService {
     adopterId: string;
   }> {
     const conv = await this.assertParticipant(conversationId, userId);
+
+    // The thread stays readable after the other side deletes their account,
+    // but new messages would go to nobody — block them with a clear error.
+    const counterpartId =
+      conv.ownerId === userId ? conv.adopterId : conv.ownerId;
+    const counterpart = await this.prisma.user.findUnique({
+      where: { id: counterpartId },
+      select: { deletedAt: true },
+    });
+    if (counterpart?.deletedAt) {
+      throw new ForbiddenException(
+        'This person has deleted their account, so the conversation is read-only',
+      );
+    }
+
     const [message] = await this.prisma.$transaction([
       this.prisma.message.create({
         data: { conversationId, senderId: userId, body },
