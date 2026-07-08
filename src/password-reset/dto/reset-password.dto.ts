@@ -1,4 +1,5 @@
 import { IsString, Length, MaxLength, MinLength } from 'class-validator';
+import { IsStrongPassword } from '../../common/validators/is-strong-password.validator';
 
 export class ResetPasswordDto {
   // Plaintext reset token from the email link (64 hex chars from 32 random
@@ -13,5 +14,6 @@ export class ResetPasswordDto {
   @IsString()
   @MinLength(10)
   @MaxLength(100)
+  @IsStrongPassword()
   password!: string;
 }
