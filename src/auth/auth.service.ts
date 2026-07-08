@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   Injectable,
   UnauthorizedException,
@@ -10,6 +11,7 @@ import * as crypto from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { SignupDto } from './dto/signup.dto';
 import { LoginDto } from './dto/login.dto';
+import { ChangePasswordDto } from './dto/change-password.dto';
 import { BCRYPT_ROUNDS } from './auth.constants';
 import type { JwtPayload } from './types';
 import type { GoogleProfilePayload } from './strategies/google.strategy';
@@ -68,7 +70,9 @@ export class AuthService {
     const user = await this.prisma.user.findUnique({
       where: { email: dto.email.toLowerCase() },
     });
-    if (!user) {
+    // Deleted (anonymized) accounts get the same generic error so the
+    // response doesn't reveal that the address once had an account.
+    if (!user || user.deletedAt) {
       throw new UnauthorizedException('Invalid email or password');
     }
     // No password on the account means the user signed up via Google. Use a
@@ -174,9 +178,85 @@ export class AuthService {
 
     const user = await this.prisma.user.findUniqueOrThrow({
       where: { id: userId },
-      select: { id: true, email: true },
+      select: { id: true, email: true, deletedAt: true },
     });
+    if (user.deletedAt) {
+      throw new UnauthorizedException('Refresh token is invalid');
+    }
     return this.issueTokens(user.id, user.email);
+  }
+
+  /**
+   * Change the password — or set a first one for Google-only accounts
+   * (passwordHash null). Signs out every other device: all refresh tokens are
+   * revoked and the passwordChangedAt bump invalidates outstanding access
+   * JWTs. The caller gets a fresh token pair so THIS session stays alive.
+   */
+  async changePassword(
+    userId: string,
+    dto: ChangePasswordDto,
+  ): Promise<TokenPair> {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, email: true, passwordHash: true, deletedAt: true },
+    });
+    if (!user || user.deletedAt) throw new UnauthorizedException();
+
+    if (user.passwordHash) {
+      if (!dto.currentPassword) {
+        throw new BadRequestException('Current password is required');
+      }
+      if (!(await bcrypt.compare(dto.currentPassword, user.passwordHash))) {
+        throw new UnauthorizedException('Current password is incorrect');
+      }
+      if (await bcrypt.compare(dto.newPassword, user.passwordHash)) {
+        throw new BadRequestException(
+          'New password must be different from the current one',
+        );
+      }
+    }
+
+    const passwordHash = await bcrypt.hash(dto.newPassword, BCRYPT_ROUNDS);
+    // Floored to the second: JwtStrategy compares the JWT's iat (whole
+    // seconds) against this timestamp, so millisecond precision would
+    // out-date the very token pair we issue below within the same second.
+    const changedAt = new Date(Math.floor(Date.now() / 1000) * 1000);
+
+    await this.prisma.$transaction([
+      this.prisma.user.update({
+        where: { id: userId },
+        data: { passwordHash, passwordChangedAt: changedAt },
+      }),
+      this.prisma.refreshToken.updateMany({
+        where: { userId, revokedAt: null },
+        data: { revokedAt: new Date() },
+      }),
+    ]);
+
+    return this.issueTokens(user.id, user.email);
+  }
+
+  /**
+   * Sign out every session except the one presenting this refresh token.
+   * Without a presented token (cookie missing), everything is revoked and the
+   * current session survives only until its access token expires.
+   */
+  async logoutAllOthers(
+    userId: string,
+    presentedRefreshToken: string | undefined,
+  ): Promise<number> {
+    const keepHash = presentedRefreshToken
+      ? this.hashToken(presentedRefreshToken)
+      : undefined;
+    const result = await this.prisma.refreshToken.updateMany({
+      where: {
+        userId,
+        revokedAt: null,
+        ...(keepHash ? { NOT: { tokenHash: keepHash } } : {}),
+      },
+      data: { revokedAt: new Date() },
+    });
+    return result.count;
   }
 
   async logout(userId: string, presentedRefreshToken: string | undefined) {

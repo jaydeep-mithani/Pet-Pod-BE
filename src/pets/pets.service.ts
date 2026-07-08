@@ -101,7 +101,11 @@ export class PetsService {
       where: { id },
       select: PET_DETAIL_SELECT,
     });
-    if (!pet) throw new NotFoundException('Pet not found');
+    // REMOVED listings are tombstones kept only so conversations survive
+    // (e.g. after the owner deleted their account) — never serve them.
+    if (!pet || pet.status === 'REMOVED') {
+      throw new NotFoundException('Pet not found');
+    }
     return pet;
   }
 

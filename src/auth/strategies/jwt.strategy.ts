@@ -29,9 +29,16 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
   async validate(payload: JwtPayload): Promise<AuthenticatedRequestUser> {
     const user = await this.prisma.user.findUnique({
       where: { id: payload.sub },
-      select: { id: true, email: true, passwordChangedAt: true },
+      select: {
+        id: true,
+        email: true,
+        passwordChangedAt: true,
+        deletedAt: true,
+      },
     });
-    if (!user) throw new UnauthorizedException();
+    // Anonymize-deleted accounts keep their row (so conversations survive for
+    // the other side) but must never authenticate again.
+    if (!user || user.deletedAt) throw new UnauthorizedException();
 
     // Revoke access tokens issued before the last password reset.
     // RefreshToken revocation alone leaves access JWTs valid until natural

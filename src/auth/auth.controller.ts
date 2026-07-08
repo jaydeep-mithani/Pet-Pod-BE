@@ -4,6 +4,7 @@ import {
   Get,
   HttpCode,
   HttpStatus,
+  Patch,
   Post,
   Req,
   Res,
@@ -11,11 +12,16 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { ApiCookieAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
-import type { CookieOptions, Request, Response } from 'express';
+import type { Request, Response } from 'express';
 import { AuthService, type TokenPair } from './auth.service';
 import { SignupDto } from './dto/signup.dto';
 import { LoginDto } from './dto/login.dto';
-import { COOKIE_ACCESS, COOKIE_REFRESH } from './auth.constants';
+import { ChangePasswordDto } from './dto/change-password.dto';
+import { COOKIE_REFRESH } from './auth.constants';
+import {
+  clearAuthCookies as clearAuthCookiesShared,
+  setAuthCookies as setAuthCookiesShared,
+} from './cookies';
 import { JwtRefreshGuard } from './guards/jwt-refresh.guard';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { GoogleAuthGuard } from './guards/google-auth.guard';
@@ -91,6 +97,44 @@ export class AuthController {
     return { ok: true };
   }
 
+  @ApiCookieAuth('pp_access')
+  @ApiOperation({
+    summary:
+      'Change the password (or set a first one for Google-only accounts). Signs out all other sessions; this one is rotated and stays alive.',
+  })
+  @UseGuards(JwtAuthGuard)
+  @Patch('password')
+  @HttpCode(HttpStatus.OK)
+  async changePassword(
+    @CurrentUser() user: AuthenticatedRequestUser,
+    @Body() dto: ChangePasswordDto,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const tokens = await this.auth.changePassword(user.id, dto);
+    this.setAuthCookies(res, tokens);
+    return { ok: true };
+  }
+
+  @ApiCookieAuth('pp_access')
+  @ApiOperation({
+    summary:
+      'Sign out every other session — revokes all refresh tokens except the one presented by this device.',
+  })
+  @UseGuards(JwtAuthGuard)
+  @Post('logout-all')
+  @HttpCode(HttpStatus.OK)
+  async logoutAll(
+    @CurrentUser() user: AuthenticatedRequestUser,
+    @Req() req: Request,
+  ) {
+    const cookies = (req.cookies as Record<string, string> | undefined) ?? {};
+    const revoked = await this.auth.logoutAllOthers(
+      user.id,
+      cookies[COOKIE_REFRESH],
+    );
+    return { revoked };
+  }
+
   @ApiOperation({
     summary:
       'Begin Google OAuth — redirects the user to Google’s consent screen.',
@@ -139,34 +183,13 @@ export class AuthController {
       : '/login?error=oauth';
   }
 
+  // Thin delegates to the shared helpers in ./cookies (also used by
+  // UsersController for account deletion) — keeps call sites above tidy.
   private setAuthCookies(res: Response, tokens: TokenPair) {
-    const base = this.baseCookieOptions();
-    res.cookie(COOKIE_ACCESS, tokens.accessToken, {
-      ...base,
-      expires: tokens.accessExpiresAt,
-    });
-    res.cookie(COOKIE_REFRESH, tokens.refreshToken, {
-      ...base,
-      expires: tokens.refreshExpiresAt,
-      path: '/auth',
-    });
+    setAuthCookiesShared(res, this.config, tokens);
   }
 
   private clearAuthCookies(res: Response) {
-    const base = this.baseCookieOptions();
-    res.clearCookie(COOKIE_ACCESS, base);
-    res.clearCookie(COOKIE_REFRESH, { ...base, path: '/auth' });
-  }
-
-  private baseCookieOptions(): CookieOptions {
-    const isSecure = this.config.get<string>('COOKIE_SECURE') === 'true';
-    const domain = this.config.get<string>('COOKIE_DOMAIN') || undefined;
-    return {
-      httpOnly: true,
-      secure: isSecure,
-      sameSite: isSecure ? 'none' : 'lax',
-      domain,
-      path: '/',
-    };
+    clearAuthCookiesShared(res, this.config);
   }
 }
